@@ -101,6 +101,18 @@ srand(42)
             end
         end
     end
+
+    @testset "ndims" begin # Issue #235
+        if gpu() >= 0
+            date("broadcast: ndims")
+            a=rand(2,2,2) |> KnetArray
+            b=rand(2,2) |> KnetArray
+            c=rand(2) |> KnetArray
+            @test a.*b == Array(a) .* Array(b)
+            @test a.*c == Array(a) .* Array(c)
+            @test b.*c == Array(b) .* Array(c)
+        end
+    end
 end
 
 date("broadcast: done")
