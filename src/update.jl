@@ -345,85 +345,83 @@ default values are listed as well.
 """
 function update! end
 
-for T in (Array{Float32},Array{Float64},KnetArray{Float32},KnetArray{Float64}); @eval begin
+const AnyArray = Union{AbstractArray{<:Number}, KnetArray{<:Number}} 
 
-    function update!(w::$T, g::$T, p::Sgd)
-        gclip!(g, p.gclip)
-        axpy!(-p.lr, g, w)
-    end
+function update!(w::AnyArray, g::AnyArray, p::Sgd)
+    gclip!(g, p.gclip)
+    w .-= p.lr .* g
+end
 
-    # Two arg defaults to SGD
-    function update!(w::$T, g::$T; lr=SGDLR, gclip=0)
-        gclip!(g, gclip)
-        axpy!(-lr, g, w)
-    end
+# Two arg defaults to SGD
+function update!(w::AnyArray, g::AnyArray; lr=SGDLR, gclip=0)
+    gclip!(g, gclip)
+    w .-= p.lr .* g
+end
 
-    function update!(w::$T, g::$T, p::Momentum)
-        gclip!(g, p.gclip)
-        if p.velocity===nothing; p.velocity=zeros(w); end
-        scale!(p.gamma, p.velocity)
-        axpy!(p.lr, g, p.velocity)
-        axpy!(-1, p.velocity, w)
-    end
+function update!(w::AnyArray, g::AnyArray, p::Momentum)
+    gclip!(g, p.gclip)
+    p.velocity===nothing && (p.velocity=zeros(w))
+    p.velocity .= p.gamma .* p.velocity .+ p.lr .* g
+    w .-= p.velocity
+end
 
-    # https://arxiv.org/pdf/1212.0901.pdf Eq. (7)
-    function update!(w::$T, g::$T, p::Nesterov)
-        gclip!(g, p.gclip)
-        p.velocity ===nothing && (p.velocity = zeros(w))
-        scale!(p.gamma, p.velocity)
-        axpy!(-1, p.velocity, w)
-        axpy!(-p.lr, g, p.velocity)
-        axpy!(1+p.gamma, p.velocity, w)
-    end
+# https://arxiv.org/pdf/1212.0901.pdf Eq. (7)
+function update!(w::AnyArray, g::AnyArray, p::Nesterov)
+    gclip!(g, p.gclip)
+    p.velocity ===nothing && (p.velocity = zeros(w))
+    scale!(p.gamma, p.velocity)
+    axpy!(-1, p.velocity, w)
+    axpy!(-p.lr, g, p.velocity)
+    axpy!(1+p.gamma, p.velocity, w)
+end
 
-    function update!(w::$T, g::$T, p::Adam)
-        gclip!(g, p.gclip)
-        if p.fstm===nothing; p.fstm=zeros(w); p.scndm=zeros(w); end
-        p.t += 1
-        scale!(p.beta1, p.fstm)
-        axpy!(1-p.beta1, g, p.fstm)
-        scale!(p.beta2, p.scndm)
-        axpy!(1-p.beta2, g .* g, p.scndm)
-        fstm_corrected = p.fstm / (1 - p.beta1 ^ p.t)
-        scndm_corrected = p.scndm / (1 - p.beta2 ^ p.t)
-        axpy!(-p.lr, (fstm_corrected ./ (sqrt.(scndm_corrected) + p.eps)), w)
-    end
+function update!(w::AnyArray, g::AnyArray, p::Adam)
+    gclip!(g, p.gclip)
+    if p.fstm===nothing; p.fstm=zeros(w); p.scndm=zeros(w); end
+    p.t += 1
+    scale!(p.beta1, p.fstm)
+    axpy!(1-p.beta1, g, p.fstm)
+    scale!(p.beta2, p.scndm)
+    axpy!(1-p.beta2, g .* g, p.scndm)
+    fstm_corrected = p.fstm / (1 - p.beta1 ^ p.t)
+    scndm_corrected = p.scndm / (1 - p.beta2 ^ p.t)
+    axpy!(-p.lr, (fstm_corrected ./ (sqrt.(scndm_corrected) + p.eps)), w)
+end
 
-    function update!(w::$T, g::$T, p::Adagrad)
-        gclip!(g, p.gclip)
-        if p.G===nothing; p.G=zeros(w); end
-        axpy!(1, g .* g, p.G)
-        axpy!(-p.lr, g ./ sqrt.(p.G + p.eps), w)
-    end
+function update!(w::AnyArray, g::AnyArray, p::Adagrad)
+    gclip!(g, p.gclip)
+    if p.G===nothing; p.G=zeros(w); end
+    axpy!(1, g .* g, p.G)
+    axpy!(-p.lr, g ./ sqrt.(p.G + p.eps), w)
+end
 
-    function update!(w::$T, g::$T, p::Adadelta)
-        gclip!(g, p.gclip)
-        if p.G===nothing; p.G=zeros(w); p.delta=zeros(w); end
-        scale!(p.rho, p.G)
-        axpy!(1-p.rho, g .* g, p.G)
-        dw = g .* sqrt.(p.delta + p.eps) ./ sqrt.(p.G + p.eps)
-        scale!(p.rho, p.delta)
-        axpy!(1-p.rho, dw .* dw , p.delta)
-        axpy!(-p.lr, dw, w)
-    end
+function update!(w::AnyArray, g::AnyArray, p::Adadelta)
+    gclip!(g, p.gclip)
+    if p.G===nothing; p.G=zeros(w); p.delta=zeros(w); end
+    scale!(p.rho, p.G)
+    axpy!(1-p.rho, g .* g, p.G)
+    dw = g .* sqrt.(p.delta + p.eps) ./ sqrt.(p.G + p.eps)
+    scale!(p.rho, p.delta)
+    axpy!(1-p.rho, dw .* dw , p.delta)
+    axpy!(-p.lr, dw, w)
+end
 
-    function update!(w::$T, g::$T, p::Rmsprop)
-        gclip!(g, p.gclip)
-        if p.G===nothing; p.G=zeros(w); end
-        scale!(p.rho, p.G)
-        axpy!(1-p.rho, g .* g, p.G)
-        axpy!(-p.lr, g ./ sqrt.(p.G + p.eps), w)
-    end
+function update!(w::AnyArray, g::AnyArray, p::Rmsprop)
+    gclip!(g, p.gclip)
+    if p.G===nothing; p.G=zeros(w); end
+    scale!(p.rho, p.G)
+    axpy!(1-p.rho, g .* g, p.G)
+    axpy!(-p.lr, g ./ sqrt.(p.G + p.eps), w)
+end
 
-    # If type of g does not match, something may be wrong
-    update!(w::$T, g, p)=error("Gradient type mismatch: w::$(typeof(w)) g::$(typeof(g))")
-    update!(w::$T, g; o...)=error("Gradient type mismatch: w::$(typeof(w)) g::$(typeof(g))")
+# If type of g does not match, something may be wrong
+update!(w::AnyArray, g, p)=error("Gradient type mismatch: w::$(typeof(w)) g::$(typeof(g))")
+update!(w::AnyArray, g; o...)=error("Gradient type mismatch: w::$(typeof(w)) g::$(typeof(g))")
 
-    # AutoGrad may return Void for a zero gradient
-    update!(w::$T, g::Void, p)=w
-    update!(w::$T, g::Void; o...)=w
+# AutoGrad may return Void for a zero gradient
+update!(w::AnyArray, g::Void, p)=w
+update!(w::AnyArray, g::Void; o...)=w
 
-end; end
 
 # AutoGrad may return Void for a zero gradient
 update!(w, g::Void, p)=w
@@ -434,9 +432,9 @@ function update!(w,g,p)
     if !(length(w)==length(g)==length(p))
         error("weight, gradient, and optimization parameters not the same length.")
     end
-    if isbits(eltype(w))
-        error("Bad args: $((typeof(w),typeof(g),typeof(p)))")
-    end
+    # if isbits(eltype(w))
+    #     error("Bad args: $((typeof(w),typeof(g),typeof(p)))")
+    # end
     for (wi,gi,pi) in zip(w,g,p)
         update!(wi,gi,pi)
     end
