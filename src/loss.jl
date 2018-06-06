@@ -91,6 +91,57 @@ end
 # dy should be -p and y=logq so this should give us -p+q
 @primitive  _logp(x,dims),dy,y  _logpback(x,y,dy,dims)
 
+"""
+    logsoftmax(x, dims=1)
+
+Equivalent to `logp(x, dims)`. See also `sotfmax`. 
+"""
+const logsoftmax = logp
+
+"""
+    softmax(x, dims=1; algo=1)
+
+The softmax function typically used in classification.
+Gives the same results as to `exp.(logp(x, dims))`. 
+
+If `algo=1` computation is more accurate, if `algo=0` it is 
+faster. 
+
+See also `logsoftmax`.
+"""
+softmax(x, dims=1; algo=1) = _softmax(x, dims; algo=algo) # generic fallback
+
+function softmax(x::A, dims=1; algo=1) where A <: Union{<:KnetArray, Rec{<:KnetArray}}
+    @assert algo ∈ [0, 1]
+    d = sort(union(dims))
+    if ndims(x) == length(d)
+        sz = size(x)
+        x = cudnnSoftmaxForward(reshape(x,(1,1,:,1)),algo=algo)
+        reshape(x, sz)
+    elseif d == [1]
+        sz = size(x)
+        x = cudnnSoftmaxForward(reshape(x, (1,1,sz[1],:)), algo=algo)
+        reshape(x, sz)
+    elseif ndims(x) == 2 && d == [2]
+        softmax(x.', 1, algo=algo).'
+    else
+        _softmax(x, dims)
+    end
+end 
+
+function _softmax(x, dims; algo=1)
+    @assert algo ∈ [0, 1]
+    if algo == 1
+        x = x .- maximum(x, dims)
+    end    
+    x = exp.(x)
+    return x ./ sum(x, dims)
+end
+
+function _softback(x,y,dy,dims)
+    return y .* dy .- y .* sum(y .* dy, dims)
+end
+
 #=
 typedef enum
 {
